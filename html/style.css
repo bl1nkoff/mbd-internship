@@ -1,0 +1,94 @@
+*{
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+}
+:root{
+	--vkcolor: #2784F5;
+	--vkhover: #0c79ea;
+    --boxshadow: 0px 2px 4px rgba(0, 0, 0, 0.2);
+    --gray: #d3d3d3;
+}
+html{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    background: #edeef0;
+}
+header{
+    width: 100%;
+    padding: 1em 0;
+    font-size: 20px;
+    font-weight: 600;
+    background: white;
+    text-align: center;
+    box-shadow: var(--boxshadow);
+}
+body > div{
+    width: max-content;
+    margin: 36px auto 0;
+}
+#map{
+    width: 1200px;
+    height: 600px;
+    background: var(--gray);
+    margin-bottom: 20px;
+    box-shadow: var(--boxshadow);
+    border-radius: 2px;
+    overflow: hidden;
+}
+#buttons{
+    margin: auto;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+#buttons label,
+#buttons button{
+    cursor: pointer;
+    font: inherit;
+    background: white;
+    border: 1px solid var(--gray);
+    border-radius: 2px;
+    font-weight: 500;
+    padding: 1em 2em;
+    box-shadow: var(--boxshadow);
+}
+#buttons button{
+    transition: all 0.2s ease;
+}
+#buttons button:disabled{
+    cursor: default;
+    opacity: .6;
+    background: var(--gray) !important;
+    color: black !important;
+    box-shadow: var(--boxshadow) !important;
+    border: 1px solid var(--gray) !important;
+}
+#buttons label:hover{
+    background: #eee;
+}
+#buttons label:active{
+    background: #ddd;
+}
+#buttons button{
+    background: var(--vkcolor);
+    border-color: var(--vkcolor);
+    color: white;
+    box-shadow: 0 2px 8px var(--vkcolor);
+}
+#buttons button:hover{
+    background: var(--vkhover);
+    transition: unset;
+}
+#buttons label input{
+    margin-right: 16px;
+}
+#buttonsA{
+    margin: 16px auto 0;
+    width: max-content;
+}
+#buttonsA A{
+    color: black;
+}
+#buttonsA A:hover{
+    color: var(--vkcolor);
+}

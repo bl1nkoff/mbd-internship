@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тестовое задание для стажёра команды Mobile BigData</title>
+    <link rel="stylesheet" href="style.css">
+    <!--<script src='https://api.mapbox.com/mapbox-gl-js/v2.1.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.1.1/mapbox-gl.css' rel='stylesheet' />
+    --></head>
+<body>
+    <header>
+        <p>Тестовое задание для стажёра команды Mobile BigData</p>
+    </header>
+    <div>
+        <div id="map"></div>
+        <div id="buttons">
+            <button class="attention" id="refresh" onclick="refreshMap()">Обновить</button>
+            <label><input id="avg" type="checkbox" checked="true"/>Средний сигнал</label>
+            <label><input id="uniq" type="checkbox" checked="true"/>Уникальные пользователи</label>
+        </div>
+        <div id="buttonsA">
+            <a id="fillDB" href="#">Начать заполнение базы</a>
+            <a id="stopFilling" href="#">Остановить заполнение базы</a>
+        </div>
+    </div>
+    <script src="map.js"></script>
+    <script src="fill.js"></script>
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBwwO4X1Q8WF23Lqf4SXfBhOVfQ6SjDpY4&callback=initMap&libraries=&v=weekly"
+      async
+    ></script>
+</body>
+</html>
