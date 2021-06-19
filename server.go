@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -15,17 +13,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-/*var disp dispatcher.Dispatcher
-
-type myJob struct {
-	w            http.ResponseWriter
-	dataJob      DataRequest
-	collectorJob Signal
-}
-
-func (job *myJob) Do() {
-	collectorHandler(job.w, job.collectorJob)
-}*/
+var PORT = "8080"
 
 type Signal struct {
 	Lat, Lng, Signal float64
@@ -54,21 +42,6 @@ type DataRequest struct {
 }
 
 func main() {
-	var (
-		maxWorkers   = flag.Int("max_workers", 5, "The number of workers to start")
-		maxQueueSize = flag.Int("max_queue_size", 100, "The size of job queue")
-		port         = flag.String("port", "8080", "The server port")
-	)
-	flag.Parse()
-
-	// Create the job queue.
-	jobQueue := make(chan Job, *maxQueueSize)
-
-	// Start the dispatcher.
-	dispatcher := NewDispatcher(jobQueue, *maxWorkers)
-	dispatcher.run()
-
-	// Start the HTTP handler.
 	http.HandleFunc("/map", func(w http.ResponseWriter, r *http.Request) {
 		mapHandler(w)
 	})
@@ -76,48 +49,54 @@ func main() {
 		dataHandler(w, r)
 	})
 	http.HandleFunc("/collector", func(w http.ResponseWriter, r *http.Request) {
-		collectorHandler(w, r, jobQueue)
+		collectorHandler(w, r)
 	})
-	log.Fatal(http.ListenAndServe(":"+*port, nil))
+	log.Fatal(http.ListenAndServe(":"+PORT, nil))
 }
 
 func dataHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
+
+	//Забираем данные из POST
 	var req DataRequest
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&req)
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
 
-	//verification
+	//Проверяем данные
 	for i := 0; i < 2; i++ {
 		if req.Area[i].Lat < -90 || req.Area[i].Lat > 90 ||
 			req.Area[i].Lon < -180 || req.Area[i].Lon > 180 {
-			w.WriteHeader(500)
+			w.WriteHeader(400)
 			return
 		}
 	}
 
+	//"Готовим" "сырую" базу данных
 	CoockDataBase()
 
+	//Переходим к основной
 	db, err := leveldb.OpenFile("datebase.db", nil)
 	if err != nil {
-		fmt.Println("рфывш")
+		w.WriteHeader(500)
 		return
 	} else {
 		defer db.Close()
 	}
 
+	//Создаём и заполняем массив для ответа
 	res := []Data_reply{}
 
 	iter := db.NewIterator(nil, nil)
 	for iter.Next() {
 		value := bytesToCell(iter.Value())
+		//Попадает ли клетка в поле видимости
 		if value.Center.Lat > req.Area[0].Lat && value.Center.Lat < req.Area[1].Lat &&
 			value.Center.Lon > req.Area[0].Lon && value.Center.Lon < req.Area[1].Lon {
 			signals := value.Data
@@ -136,15 +115,15 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 			res = append(res, cell)
 		}
 	}
-
 	iter.Release()
 
+	//Если ничего не попадает, то возвращем код (без него js не хотел парсить "[]")
 	if len(res) == 0 {
 		w.WriteHeader(404)
 		return
 	}
 
-	//form response
+	//Отдаём JSON
 	w.Header().Set("Content-Type", "application/json")
 	resBytes := new(bytes.Buffer)
 	_ = json.NewEncoder(resBytes).Encode(&res)
@@ -152,14 +131,24 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func mapHandler(w http.ResponseWriter) {
-	parsedTemplate, _ := template.ParseFiles("html/map.html")
-	err := parsedTemplate.Execute(w, nil)
+	//Отдаём html страницу
+	parsedTemplate, err := template.ParseFiles("html/map.html")
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	err = parsedTemplate.Execute(w, nil)
 	if err != nil {
 		w.WriteHeader(500)
 	}
 }
 
-func collectorHandler(w http.ResponseWriter, r *http.Request, jobQueue chan Job) {
+func collectorHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(400)
+		return
+	}
+	//Забираем данные из POST
 	var s Signal
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&s)
@@ -167,30 +156,38 @@ func collectorHandler(w http.ResponseWriter, r *http.Request, jobQueue chan Job)
 		w.WriteHeader(500)
 		return
 	}
-	/*disp.Dispatch(&myJob{
-		w:            w,
-		collectorJob: s,
-	})*/
 
-	//verification
+	//Проверяем данные
 	if s.Lat < -90 || s.Lat > 90 || s.Lng < -180 || s.Lng > 180 ||
 		s.Signal < 0 || s.Signal > 100 || !IsValidUUID(s.User_id) {
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
 
+	//Подключаемся к "сырой" базе данных
 	db, _ := leveldb.OpenFile("datebaseRaw.db", nil)
 	defer db.Close()
 
+	//Отправляем данные туда. В виде ключа используем время в милисекундах, просто как уникальную строку
 	_ = db.Put(TimetoBytes(), SignaltoBytes(s), nil)
 }
 
 func CoockDataBase() {
-	dbR, _ := leveldb.OpenFile("datebaseRaw.db", nil)
-	defer dbR.Close()
-	db, _ := leveldb.OpenFile("datebase.db", nil)
-	defer db.Close()
+	//Подключаемся к базам
+	dbR, err := leveldb.OpenFile("datebaseRaw.db", nil)
+	if err != nil {
+		return
+	} else {
+		defer dbR.Close()
+	}
+	db, err := leveldb.OpenFile("datebase.db", nil)
+	if err != nil {
+		return
+	} else {
+		defer db.Close()
+	}
 
+	//Цикл по сырой базе
 	iter := dbR.NewIterator(nil, nil)
 	for iter.Next() {
 		s := bytesToSignal(iter.Value())
@@ -199,16 +196,14 @@ func CoockDataBase() {
 		cellID := s2.CellIDFromLatLng(ll).Parent(15) // get CellID, set 15 ур
 		cell := s2.CellFromCellID(cellID)            // get Cell по
 
-		//search in db
+		//Ищем полученную клетку в обычной БД
 		cellKey := s2CellIDtoBytes(cellID)
 		data, err := db.Get(cellKey, nil)
 
 		if err == leveldb.ErrNotFound {
-
-			//Cel was no found - create
+			//Клетка не найдена
+			//Забираем угловые координаты
 			vertices := s2.PolygonFromCell(cell).Loop(0).Vertices()
-
-			//Coordinates from Cell
 			var coordinates []Coordinate
 			for i := 0; i < len(vertices); i++ {
 				latlng := s2.LatLngFromPoint(vertices[i])
@@ -216,7 +211,7 @@ func CoockDataBase() {
 				coordinates = append(coordinates, coordinate)
 			}
 
-			//New Cell
+			//Забираем координаты центра
 			center := cell.RectBound().Center()
 			newCell := Cell{
 				Center:      Coordinate{center.Lat.Degrees(), center.Lng.Degrees()},
@@ -227,20 +222,30 @@ func CoockDataBase() {
 			data = CelltoBytes(newCell)
 
 		} else if err != nil {
-
+			//Неизвестная ошибка - пропускаем итерацию
 			continue
-
 		} else {
-
-			//Cell exists
+			//Клетка существует - дополняем
 			oldCell := bytesToCell(data)
 			oldCell.Data = append(oldCell.Data, s)
 			data = CelltoBytes(oldCell)
 		}
 
-		//Write new cell in DB and Return status code
-		_ = db.Put(cellKey, data, nil)
+		//Записываем модифицированную или новую клетку в БД
+		err = db.Put(cellKey, data, nil)
+		if err != nil {
+			return
+		} else {
+			defer dbR.Close()
+		}
+
+		//Удаляем обаботанный сигнал из "сырой" БД
 		err = dbR.Delete(iter.Key(), nil)
+		if err != nil {
+			return
+		} else {
+			defer dbR.Close()
+		}
 	}
 	iter.Release()
 }
@@ -262,6 +267,7 @@ func unique(stringSlice []string) []string {
 	return list
 }
 
+//Хотелось бы переписать эти две функии с необявленным типом, как это можно сделать в C++, но такого не нашёл
 func s2CellIDtoBytes(value s2.CellID) []byte {
 	valueBytes := new(bytes.Buffer)
 	_ = json.NewEncoder(valueBytes).Encode(&value)
