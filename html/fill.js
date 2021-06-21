@@ -29,7 +29,7 @@ const fillDB = () => {
         .catch(err=>{
             console.log(`Ошибка: ${++errors}`)
             errorsInARow++})
-    }, 700)
+    }, 400)
 }
 
 const stopFilling = () => {

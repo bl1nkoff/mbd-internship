@@ -3,17 +3,21 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"regexp"
 	"time"
 
+	//"github.com/YSZhuoyang/go-dispatcher/dispatcher"
 	"github.com/golang/geo/s2"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
 var PORT = "8080"
+
+//var disp dispatcher.Dispatcher
 
 type Signal struct {
 	Lat, Lng, Signal float64
@@ -41,7 +45,20 @@ type DataRequest struct {
 	Area [2]Coordinate
 }
 
+/*type myJob struct {
+	Signal Signal
+}
+
+func (job *myJob) Do() {
+	err := collectorDataBaseHandler(job.Signal)
+	if err != nil {
+		fmt.Println("Error")
+	}
+}*/
+
 func main() {
+	//disp, _ = dispatcher.NewDispatcher(1000)
+	fmt.Println("Listening on " + PORT)
 	http.HandleFunc("/map", func(w http.ResponseWriter, r *http.Request) {
 		mapHandler(w)
 	})
@@ -51,10 +68,16 @@ func main() {
 	http.HandleFunc("/collector", func(w http.ResponseWriter, r *http.Request) {
 		collectorHandler(w, r)
 	})
+	http.Handle("/", http.FileServer(http.Dir("html/")))
 	log.Fatal(http.ListenAndServe(":"+PORT, nil))
+	//disp.Finalize()
 }
 
 func dataHandler(w http.ResponseWriter, r *http.Request) {
+	//Разрешаем все источники
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	//Проверяем метод
 	if r.Method != "POST" {
 		w.WriteHeader(400)
 		return
@@ -82,7 +105,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 	CoockDataBase()
 
 	//Переходим к основной
-	db, err := leveldb.OpenFile("datebase.db", nil)
+	db, err := leveldb.OpenFile("database.db", nil)
 	if err != nil {
 		w.WriteHeader(500)
 		return
@@ -144,6 +167,10 @@ func mapHandler(w http.ResponseWriter) {
 }
 
 func collectorHandler(w http.ResponseWriter, r *http.Request) {
+	//Разрешаем все источники
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	//Проверяем метод
 	if r.Method != "POST" {
 		w.WriteHeader(400)
 		return
@@ -164,23 +191,30 @@ func collectorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	/*disp.Dispatch(&myJob{
+		Signal: s,
+	})*/
+	go collectorDataBaseHandler(s)
+}
+
+func collectorDataBaseHandler(s Signal) error {
 	//Подключаемся к "сырой" базе данных
-	db, _ := leveldb.OpenFile("datebaseRaw.db", nil)
+	db, _ := leveldb.OpenFile("databaseRaw.db", nil)
 	defer db.Close()
 
 	//Отправляем данные туда. В виде ключа используем время в милисекундах, просто как уникальную строку
-	_ = db.Put(TimetoBytes(), SignaltoBytes(s), nil)
+	return db.Put(TimetoBytes(), SignaltoBytes(s), nil)
 }
 
 func CoockDataBase() {
 	//Подключаемся к базам
-	dbR, err := leveldb.OpenFile("datebaseRaw.db", nil)
+	dbR, err := leveldb.OpenFile("databaseRaw.db", nil)
 	if err != nil {
 		return
 	} else {
 		defer dbR.Close()
 	}
-	db, err := leveldb.OpenFile("datebase.db", nil)
+	db, err := leveldb.OpenFile("database.db", nil)
 	if err != nil {
 		return
 	} else {
