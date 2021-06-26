@@ -22,11 +22,11 @@ const refreshMap = async () => {
 	let data = {
 		"Area":[
 			{
-				"lat": bounds.lc.g,
+				"lat": bounds.mc.g,
 				"lon": bounds.Eb.g
 			},
 			{
-				"lat": bounds.lc.i,
+				"lat": bounds.mc.i,
 				"lon": bounds.Eb.i
 			},
 		]

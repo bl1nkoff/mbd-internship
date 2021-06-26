@@ -26,8 +26,10 @@ type Signal struct {
 
 type Cell struct {
 	Center      Coordinate
-	Data        []Signal
 	Coordinates []Coordinate
+	Uniq_users  []string
+	Signal_avg  float64
+	Quantity    int64
 }
 
 type Coordinate struct {
@@ -101,10 +103,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	//"Готовим" "сырую" базу данных
-	CoockDataBase()
-
-	//Переходим к основной
+	//Подключаем БД
 	db, err := leveldb.OpenFile("database.db", nil)
 	if err != nil {
 		w.WriteHeader(500)
@@ -122,18 +121,11 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 		//Попадает ли клетка в поле видимости
 		if value.Center.Lat > req.Area[0].Lat && value.Center.Lat < req.Area[1].Lat &&
 			value.Center.Lon > req.Area[0].Lon && value.Center.Lon < req.Area[1].Lon {
-			signals := value.Data
-			summ := float64(0)
-			uniq := []string{}
-			for _, s := range signals {
-				summ += s.Signal
-				uniq = append(uniq, s.User_id)
-			}
 			cell := Data_reply{
 				S2_id:          bytesToUint64(iter.Key()),
 				S2_coordinates: value.Coordinates,
-				Uniq_users:     uint64(len(unique(uniq))),
-				Signal_avg:     summ / float64(len(signals)),
+				Uniq_users:     uint64(len(value.Uniq_users)),
+				Signal_avg:     value.Signal_avg,
 			}
 			res = append(res, cell)
 		}
@@ -194,94 +186,71 @@ func collectorHandler(w http.ResponseWriter, r *http.Request) {
 	/*disp.Dispatch(&myJob{
 		Signal: s,
 	})*/
-	go collectorDataBaseHandler(s)
+	go fmt.Println(collectorDataBaseHandler(s))
 }
 
 func collectorDataBaseHandler(s Signal) error {
 	//Подключаемся к "сырой" базе данных
-	db, _ := leveldb.OpenFile("databaseRaw.db", nil)
-	defer db.Close()
-
-	//Отправляем данные туда. В виде ключа используем время в милисекундах, просто как уникальную строку
-	return db.Put(TimetoBytes(), SignaltoBytes(s), nil)
-}
-
-func CoockDataBase() {
-	//Подключаемся к базам
-	dbR, err := leveldb.OpenFile("databaseRaw.db", nil)
-	if err != nil {
-		return
-	} else {
-		defer dbR.Close()
-	}
 	db, err := leveldb.OpenFile("database.db", nil)
 	if err != nil {
-		return
+		return err
 	} else {
 		defer db.Close()
 	}
 
-	//Цикл по сырой базе
-	iter := dbR.NewIterator(nil, nil)
-	for iter.Next() {
-		s := bytesToSignal(iter.Value())
-		//S2
-		ll := s2.LatLngFromDegrees(s.Lat, s.Lng)     //get LatLon for CellID
-		cellID := s2.CellIDFromLatLng(ll).Parent(15) // get CellID, set 15 ур
-		cell := s2.CellFromCellID(cellID)            // get Cell по
+	//S2
+	ll := s2.LatLngFromDegrees(s.Lat, s.Lng)     //get LatLon for CellID
+	cellID := s2.CellIDFromLatLng(ll).Parent(15) // get CellID, set 15 ур
+	cell := s2.CellFromCellID(cellID)            // get Cell по
 
-		//Ищем полученную клетку в обычной БД
-		cellKey := s2CellIDtoBytes(cellID)
-		data, err := db.Get(cellKey, nil)
+	//Ищем полученную клетку в БД
+	cellKey := s2CellIDtoBytes(cellID)
+	data, err := db.Get(cellKey, nil)
 
-		if err == leveldb.ErrNotFound {
-			//Клетка не найдена
-			//Забираем угловые координаты
-			vertices := s2.PolygonFromCell(cell).Loop(0).Vertices()
-			var coordinates []Coordinate
-			for i := 0; i < len(vertices); i++ {
-				latlng := s2.LatLngFromPoint(vertices[i])
-				coordinate := Coordinate{latlng.Lat.Degrees(), latlng.Lng.Degrees()}
-				coordinates = append(coordinates, coordinate)
-			}
-
-			//Забираем координаты центра
-			center := cell.RectBound().Center()
-			newCell := Cell{
-				Center:      Coordinate{center.Lat.Degrees(), center.Lng.Degrees()},
-				Data:        []Signal{s},
-				Coordinates: coordinates,
-			}
-
-			data = CelltoBytes(newCell)
-
-		} else if err != nil {
-			//Неизвестная ошибка - пропускаем итерацию
-			continue
-		} else {
-			//Клетка существует - дополняем
-			oldCell := bytesToCell(data)
-			oldCell.Data = append(oldCell.Data, s)
-			data = CelltoBytes(oldCell)
+	if err == leveldb.ErrNotFound {
+		//Клетка не найдена
+		//Забираем угловые координаты
+		vertices := s2.PolygonFromCell(cell).Loop(0).Vertices()
+		var coordinates []Coordinate
+		for i := 0; i < len(vertices); i++ {
+			latlng := s2.LatLngFromPoint(vertices[i])
+			coordinate := Coordinate{latlng.Lat.Degrees(), latlng.Lng.Degrees()}
+			coordinates = append(coordinates, coordinate)
 		}
 
-		//Записываем модифицированную или новую клетку в БД
-		err = db.Put(cellKey, data, nil)
-		if err != nil {
-			return
-		} else {
-			defer dbR.Close()
+		//Забираем координаты центра
+		center := cell.RectBound().Center()
+		newCell := Cell{
+			Center:      Coordinate{center.Lat.Degrees(), center.Lng.Degrees()},
+			Coordinates: coordinates,
+			Quantity:    1,
+			Signal_avg:  s.Signal,
+			Uniq_users:  []string{s.User_id},
 		}
 
-		//Удаляем обаботанный сигнал из "сырой" БД
-		err = dbR.Delete(iter.Key(), nil)
-		if err != nil {
-			return
-		} else {
-			defer dbR.Close()
+		data = CelltoBytes(newCell)
+
+	} else if err == nil {
+		//Клетка существует - дополняем
+		oldCell := bytesToCell(data)
+		oldCell.Signal_avg = (oldCell.Signal_avg*float64(oldCell.Quantity) + s.Signal) / float64(oldCell.Quantity+1)
+		oldCell.Quantity = oldCell.Quantity + 1
+		if !contains(oldCell.Uniq_users, s.User_id) {
+			oldCell.Uniq_users = append(oldCell.Uniq_users, s.User_id)
 		}
+		data = CelltoBytes(oldCell)
+	} else {
+		return err
 	}
-	iter.Release()
+
+	//Записываем модифицированную или новую клетку в БД
+	err = db.Put(cellKey, data, nil)
+	if err != nil {
+		return err
+	} else {
+		defer db.Close()
+	}
+	return nil
 }
 
 func IsValidUUID(uuid string) bool {
@@ -289,19 +258,16 @@ func IsValidUUID(uuid string) bool {
 	return r.MatchString(uuid)
 }
 
-func unique(stringSlice []string) []string {
-	keys := make(map[string]bool)
-	list := []string{}
-	for _, entry := range stringSlice {
-		if _, value := keys[entry]; !value {
-			keys[entry] = true
-			list = append(list, entry)
+func contains(stringSlice []string, value string) bool {
+	for i := 0; i < len(stringSlice); i++ {
+		if stringSlice[i] == value {
+			return true
 		}
 	}
-	return list
+	return false
 }
 
-//Хотелось бы переписать эти две функии с необявленным типом, как это можно сделать в C++, но такого не нашёл
+//Хотелось бы переписать все эти функии (тип -> байты, байты -> тип), в две универсальные с необявленным типом, как это можно сделать в C++, но такого не нашёл
 func s2CellIDtoBytes(value s2.CellID) []byte {
 	valueBytes := new(bytes.Buffer)
 	_ = json.NewEncoder(valueBytes).Encode(&value)
@@ -336,13 +302,6 @@ func bytesToCell(value []byte) Cell {
 
 func bytesToUint64(value []byte) uint64 {
 	var result uint64
-	reqBodyBytes := bytes.NewBuffer(value)
-	json.NewDecoder(reqBodyBytes).Decode(&result)
-	return result
-}
-
-func bytesToSignal(value []byte) Signal {
-	var result Signal
 	reqBodyBytes := bytes.NewBuffer(value)
 	json.NewDecoder(reqBodyBytes).Decode(&result)
 	return result
