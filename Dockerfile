@@ -1,9 +1,7 @@
-FROM bash
+FROM golang:alpine
 
-RUN mkdir -p /usr/src/app/
-
-WORKDIR /usr/src/app
-
-COPY . /usr/src/app
-
-CMD server
+RUN mkdir /files
+COPY server.go /files
+WORKDIR /files
+RUN go build -o /files/server server.go
+ENTRYPOINT ["/files/server"]
